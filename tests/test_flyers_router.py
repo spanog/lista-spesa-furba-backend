@@ -229,6 +229,31 @@ async def test_flyer_discovery_reuses_public_location_context_once():
     public_context.assert_called_once_with(sb, request, "user-1")
 
 
+def test_flyer_discovery_flattens_supermarket_municipality_for_cards():
+    sb = MagicMock()
+    sb.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
+        {
+            "id": "sup-1",
+            "name": "Conad",
+            "municipality_code": "080061",
+            "municipalities": {"name": "Polistena", "province_code": "RC"},
+        }
+    ]
+
+    supermarkets = _flyers_module._nearby_supermarket_rows(sb, {"sup-1": 1.2})
+
+    assert supermarkets == [
+        {
+            "id": "sup-1",
+            "name": "Conad",
+            "municipality_code": "080061",
+            "municipality_name": "Polistena",
+            "municipality_province_code": "RC",
+            "distance_km": 1.2,
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_flyer_targets_returns_all_active_branches_for_admin():
     sb = MagicMock()

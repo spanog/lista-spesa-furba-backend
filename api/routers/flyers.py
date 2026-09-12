@@ -200,7 +200,7 @@ def _nearby_supermarket_rows(sb, distances: dict[str, float | None]) -> list[dic
         or []
     )
     visible = [
-        {**row, "distance_km": distances[row["id"]]}
+        {**public_supermarket(row), "distance_km": distances[row["id"]]}
         for row in rows
         if row.get("id") in distances
     ]
