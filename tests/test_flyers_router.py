@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # ---------------------------------------------------------------------------
 # Stub infrastructure modules not available without a full venv
 # ---------------------------------------------------------------------------
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -38,7 +38,6 @@ _config_mod.settings = _settings_obj  # type: ignore[attr-defined]
 sys.modules["core.config"] = _config_mod
 
 sys.modules["core.database"] = MagicMock()
-sys.modules["services.geocoding"] = MagicMock()
 for _svc_mod in ("services.extraction.service", "services.extraction", "services.extraction.providers"):
     sys.modules.pop(_svc_mod, None)
 
@@ -238,7 +237,16 @@ async def test_flyer_targets_returns_all_active_branches_for_admin():
     query.eq.return_value = query
     query.order.return_value = query
     query.execute.return_value = MagicMock(
-        data=[{"id": "sup-near"}, {"id": "sup-far"}]
+        data=[
+            {
+                "id": "sup-near",
+                "municipalities": {"name": "Polistena", "province_code": "RC"},
+            },
+            {
+                "id": "sup-far",
+                "municipalities": {"name": "Taurianova", "province_code": "RC"},
+            },
+        ]
     )
     sb.table.return_value = query
 
@@ -246,7 +254,18 @@ async def test_flyer_targets_returns_all_active_branches_for_admin():
         response = await _get("/flyers/targets", {_DEP_PROFILE: lambda: ADMIN_PROFILE})
 
     assert response.status_code == 200
-    assert response.json() == [{"id": "sup-near"}, {"id": "sup-far"}]
+    assert response.json() == [
+        {
+            "id": "sup-near",
+            "municipality_name": "Polistena",
+            "municipality_province_code": "RC",
+        },
+        {
+            "id": "sup-far",
+            "municipality_name": "Taurianova",
+            "municipality_province_code": "RC",
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -257,14 +276,27 @@ async def test_flyer_targets_returns_only_managed_branches_for_manager():
     query.eq.return_value = query
     query.in_.return_value = query
     query.order.return_value = query
-    query.execute.return_value = MagicMock(data=[{"id": "sup-1"}])
+    query.execute.return_value = MagicMock(
+        data=[
+            {
+                "id": "sup-1",
+                "municipalities": {"name": "Polistena", "province_code": "RC"},
+            }
+        ]
+    )
     sb.table.return_value = query
 
     with patch("api.routers.flyers.get_supabase", return_value=sb):
         response = await _get("/flyers/targets", {_DEP_PROFILE: lambda: MANAGER_PROFILE})
 
     assert response.status_code == 200
-    assert response.json() == [{"id": "sup-1"}]
+    assert response.json() == [
+        {
+            "id": "sup-1",
+            "municipality_name": "Polistena",
+            "municipality_province_code": "RC",
+        }
+    ]
     query.in_.assert_called_once_with("id", ["sup-1"])
 
 

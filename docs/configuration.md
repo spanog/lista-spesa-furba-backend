@@ -16,7 +16,6 @@ GOOGLE_API_KEY=<google-api-key>
 GEMINI_MODEL=gemma-4-31b-it
 
 # ── Servizi esterni opzionali in locale -------------------------------------
-GEOCODING_PROVIDER=nominatim         # default locale: allinea sviluppo manuale a produzione
 WEBMASTER_EMAIL=webmaster@example.com
 MAIL_FROM=no-reply@girospesa.local
 SMTP_HOST=localhost
@@ -75,7 +74,6 @@ Flow identica in locale, test, prod: cambia solo valore env.
 | Servizio | Scopo | Configurazione | Note |
 |----------|-------|----------------|------|
 | **Google Gemini** | Estrazione AI volantini | `GOOGLE_API_KEY` + `GEMINI_MODEL` | Unica dipendenza esterna richiesta quando usi AI extraction |
-| **Nominatim (OpenStreetMap)** | Geocoding indirizzi | `GEOCODING_PROVIDER=nominatim` | Default in locale per test manuali end-to-end; disabilitalo solo se vuoi evitare chiamate esterne |
 | **SMTP provider** | Email transazionali / contatto pubblico | `MAIL_FROM` + `SMTP_*` | Backend runtime attuale usa SMTP diretto via `smtplib`; in produzione GiroSpesa usa `Brevo` come relay SMTP e `Aruba` solo per ricezione mailbox |
 | **Web Push (VAPID)** | Notifiche browser | Coppia VAPID | Standard W3C, nessun servizio proprietario |
 

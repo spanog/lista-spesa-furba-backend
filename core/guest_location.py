@@ -14,14 +14,18 @@ GUEST_LOCATION_RADIUS_KM = 10.0
 GUEST_LOCATION_TTL_SECONDS = 60 * 60 * 24 * 30
 
 
-def create_guest_location_token(lat: float, lng: float) -> str:
+def create_guest_location_token(municipality_code: str) -> str:
     return create_session_token(
-        {"typ": GUEST_LOCATION_TYPE, "lat": lat, "lng": lng, "radius": GUEST_LOCATION_RADIUS_KM},
+        {
+            "typ": GUEST_LOCATION_TYPE,
+            "municipality_code": municipality_code,
+            "radius": GUEST_LOCATION_RADIUS_KM,
+        },
         lifetime_seconds=GUEST_LOCATION_TTL_SECONDS,
     )
 
 
-def read_guest_location(token: str | None) -> tuple[float, float, float] | None:
+def read_guest_location(token: str | None) -> tuple[str, float] | None:
     if not token:
         return None
     claims = read_session_token(token)
@@ -30,14 +34,14 @@ def read_guest_location(token: str | None) -> tuple[float, float, float] | None:
     return _location_from_claims(claims)
 
 
-def _location_from_claims(claims: dict[str, Any]) -> tuple[float, float, float] | None:
-    lat, lng, radius = claims.get("lat"), claims.get("lng"), claims.get("radius")
-    numeric = (lat, lng, radius)
-    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in numeric):
+def _location_from_claims(claims: dict[str, Any]) -> tuple[str, float] | None:
+    municipality_code = claims.get("municipality_code")
+    radius = claims.get("radius")
+    if not isinstance(municipality_code, str) or not municipality_code.isdigit():
         return None
-    if not -90 <= lat <= 90 or not -180 <= lng <= 180 or radius != GUEST_LOCATION_RADIUS_KM:
+    if len(municipality_code) != 6 or radius != GUEST_LOCATION_RADIUS_KM:
         return None
-    return float(lat), float(lng), float(radius)
+    return municipality_code, float(radius)
 
 
 def cookie_secure(origin: str | None = None) -> bool:

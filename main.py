@@ -19,9 +19,9 @@ from api.routers import (
     auth,
     contact_requests,
     flyers,
-    geocoding,
     guest_location,
     lists,
+    municipalities,
     notifications,
     ops,
     offers,
@@ -166,7 +166,7 @@ app.add_middleware(RequestTimingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(guest_location.router, prefix="/guest-location", tags=["guest-location"])
-app.include_router(geocoding.router, prefix="/geocoding", tags=["geocoding"])
+app.include_router(municipalities.router, prefix="/municipalities", tags=["municipalities"])
 app.include_router(flyers.router, prefix="/flyers", tags=["flyers"])
 app.include_router(supermarkets.router, prefix="/supermarkets", tags=["supermarkets"])
 app.include_router(lists.router, prefix="/lists", tags=["lists"])

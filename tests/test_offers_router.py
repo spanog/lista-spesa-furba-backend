@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # ---------------------------------------------------------------------------
 # Stub infrastructure modules
 # ---------------------------------------------------------------------------
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -67,25 +67,27 @@ async def _get(url: str) -> httpx.Response:
         return await client.get(url)
 
 
-def test_authenticated_request_location_prefers_search_location_and_profile_radius():
+def test_authenticated_request_location_uses_profile_municipality_and_radius():
     sb = MagicMock()
     sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
         data={
-            "search_lat": 38.4,
-            "search_lng": 16.1,
-            "home_lat": 38.5,
-            "home_lng": 16.2,
+            "municipality_code": "080061",
             "max_distance_km": 7,
         }
     )
 
     location = request_location(sb, "user-1", None)
 
-    assert location == (38.4, 16.1, 7.0)
+    assert location.municipality_code == "080061"
+    assert location.max_distance_km == 7.0
 
 
 def test_guest_request_location_uses_signed_cookie_location():
-    assert request_location(MagicMock(), None, (38.4, 16.1, 10.0)) == (38.4, 16.1, 10.0)
+    location = request_location(MagicMock(), None, ("080061", 10.0))
+
+    assert location is not None
+    assert location.municipality_code == "080061"
+    assert location.max_distance_km == 10.0
 
 
 def _make_sb(supermarket_data: dict | None = None) -> MagicMock:
@@ -185,7 +187,7 @@ async def test_list_public_offers_filters_by_subcategory():
 
     with (
         patch("api.routers.offers.get_supabase", return_value=sb),
-        patch("api.routers.offers.read_guest_location", return_value=(38.4, 16.1, 10)),
+        patch("api.routers.offers.read_guest_location", return_value=("080061", 10)),
         patch(
             "api.routers.offers.nearby_supermarket_distances",
             return_value={"sup-1": 1.2},
@@ -325,21 +327,16 @@ def test_offer_summary_counts_deduplicated_representatives():
     }
 
 
-def test_supermarket_address_keeps_only_city_for_city_only_location():
-    assert _offers_module._supermarket_address(
-        {
-            "name": "Conad Superstore",
-            "address": "Conad Superstore - Taurianova",
-            "city": "Taurianova",
-        },
-        "Conad Superstore",
-    ) == "Taurianova"
+def test_supermarket_municipality_includes_province_code():
+    assert _offers_module._supermarket_municipality(
+        {"municipalities": {"name": "Taurianova", "province_code": "RC"}}
+    ) == "Taurianova (RC)"
 
 
-def test_supermarket_address_keeps_street_and_city():
-    assert _offers_module._supermarket_address(
-        {"address": "Via Roma 12", "city": "Milano"}, None
-    ) == "Via Roma 12, Milano"
+def test_supermarket_municipality_falls_back_to_name():
+    assert _offers_module._supermarket_municipality(
+        {"municipalities": {"name": "Milano", "province_code": None}}
+    ) == "Milano"
 
 class TestCreateManualOffer:
     @pytest.mark.asyncio

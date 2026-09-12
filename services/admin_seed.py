@@ -11,14 +11,7 @@ from pathlib import Path
 import httpx
 
 from core.config import settings
-from services.geocoding import geocode_address
-
-ADMIN_HOME_ADDRESS = "Via Palmiro Togliatti"
-ADMIN_HOME_CITY = "Polistena"
-ADMIN_HOME_PROVINCE = "RC"
-ADMIN_HOME_POSTAL_CODE = "89024"
-ADMIN_HOME_LAT = 38.40172
-ADMIN_HOME_LNG = 16.07398
+ADMIN_MUNICIPALITY_CODE = "080061"
 DEFAULT_LIST_NAME = "La mia lista"
 
 
@@ -112,30 +105,13 @@ def _upsert_admin_profile(supabase_client, seed: AdminSeed, user_id: str) -> Non
 
 
 def _admin_profile_payload(seed: AdminSeed, user_id: str) -> dict:
-    home_lat, home_lng = _resolve_admin_home_coordinates()
     return {
         "id": user_id,
         "display_name": _display_name_from_email(seed.email),
-        "home_address": ADMIN_HOME_ADDRESS,
-        "home_city": ADMIN_HOME_CITY,
-        "home_province": ADMIN_HOME_PROVINCE,
-        "home_postal_code": ADMIN_HOME_POSTAL_CODE,
-        "home_lat": home_lat,
-        "home_lng": home_lng,
+        "municipality_code": ADMIN_MUNICIPALITY_CODE,
         "role": seed.profile_role,
         "managed_supermarket_id": None,
     }
-
-
-def _resolve_admin_home_coordinates() -> tuple[float, float]:
-    full_address = (
-        f"{ADMIN_HOME_ADDRESS}, {ADMIN_HOME_POSTAL_CODE} "
-        f"{ADMIN_HOME_CITY} ({ADMIN_HOME_PROVINCE})"
-    )
-    coords = geocode_address(full_address)
-    if coords is not None:
-        return coords
-    return ADMIN_HOME_LAT, ADMIN_HOME_LNG
 
 
 def ensure_default_empty_list_for_user(supabase_client, user_id: str) -> bool:

@@ -26,7 +26,6 @@ Valori locali canonici:
 
 - `SUPABASE_URL=http://127.0.0.1:54321`
 - `FRONTEND_URL=http://localhost:3000` come valore canonico; `http://127.0.0.1:3000` resta supportato in CORS per compatibilita' loopback
-- `GEOCODING_PROVIDER=nominatim` in locale, così signup/profilo/seed admin riflettono comportamento reale durante sviluppo manuale
 - `GOOGLE_API_KEY` richiesto solo se si vuole usare estrazione AI Gemini
 - `WEBMASTER_EMAIL`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS` e `SMTP_USE_SSL` servono per i form pubblici `/contact-requests`
 - in produzione attuale GiroSpesa usa `Brevo` come relay SMTP applicativo; `Aruba` resta il provider delle mailbox umane (`info@`, ecc.)
@@ -71,7 +70,7 @@ Bootstrap admin condiviso per locale/test/prod:
   - utente auth esiste
   - `app_metadata.role = "admin"`
   - `public.user_profiles.role = 'admin'`
-  - profilo admin con indirizzo `Via Palmiro Togliatti, 89024 Polistena (RC)`
+  - profilo admin con Comune ISTAT Polistena (`080061`), senza indirizzo o coordinate utente
   - almeno una `shopping_lists` attiva e vuota, con membership `owner`
 - Script e' idempotente:
   - crea admin se manca
@@ -199,7 +198,6 @@ I CLI di valutazione e QA vivono in `scripts/extraction/`. Il runtime ufficiale 
 | Processo host | FastAPI backend | Sì | Porta `8000` |
 | Processo host | Next.js frontend | Sì | Repo separato, porta `3000` |
 | API esterna | Google Gemini | Solo per estrazione volantini | Unica dipendenza esterna richiesta per AI extraction |
-| Servizio esterno | Nominatim | No | Geocoding attivo di default in locale per prove manuali end-to-end |
 | Servizio esterno | SMTP server | No | Necessario solo per invio mail da `/contact-requests` |
 
 ---

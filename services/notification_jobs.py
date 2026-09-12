@@ -63,16 +63,15 @@ def _enqueue_recipient(sb: object, payload: dict[str, Any], user_id: str) -> Non
 
 def _supermarket_notification_location(sb: object, supermarket_id: str) -> str | None:
     response = sb.table("supermarkets").select(  # type: ignore[union-attr]
-        "address, city"
+        "municipalities(name,province_code)"
     ).eq("id", supermarket_id).maybe_single().execute()
     supermarket = response.data if response else None
     if not isinstance(supermarket, dict):
         return None
-    address = str(supermarket.get("address") or "").strip()
-    city = str(supermarket.get("city") or "").strip()
-    if address and city:
-        return f"{address}, {city}"
-    return address or city or None
+    municipality = supermarket.get("municipalities") or {}
+    name = str(municipality.get("name") or "").strip()
+    province = str(municipality.get("province_code") or "").strip()
+    return f"{name} ({province})" if name and province else name or None
 
 
 def _enqueue(

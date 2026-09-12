@@ -32,8 +32,6 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"
     google_api_key: str = ""
     gemini_model: str = "gemma-4-31b-it"
-    geocoding_provider: str = "nominatim"
-
     vapid_private_key: str = ""
     vapid_public_key: str = ""
     vapid_mailto: str = "mailto:info@girospesa.it"

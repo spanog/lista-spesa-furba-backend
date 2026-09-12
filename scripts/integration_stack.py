@@ -61,7 +61,6 @@ def integration_env() -> dict[str, str]:
         "LLM_PROVIDER": "gemini",
         "GOOGLE_API_KEY": "",
         "GEMINI_MODEL": "gemini-2.5-flash",
-        "GEOCODING_PROVIDER": "disabled",
         "FRONTEND_URL": "http://127.0.0.1:3000",
     }
 

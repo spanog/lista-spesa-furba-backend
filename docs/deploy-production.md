@@ -80,7 +80,6 @@ Set these in Render Dashboard: service `girospesa-backend` → `Environment`.
 | `DB_DSN` | Yes | Direct Postgres connection for LISTEN/NOTIFY, concurrent-safe list sync, and direct DB operations. | Supabase Dashboard → Connect → URI / Supavisor session-mode connection string; use production DB password. |
 | `GOOGLE_API_KEY` | Flyer extraction | Google AI Studio/Gemini API key for AI flyer extraction. | Google AI Studio → API keys. Required when production extraction is enabled. |
 | `GEMINI_MODEL` | Flyer extraction | Gemini model name used by extraction runtime. | `gemma-4-31b-it`, fixed in `render.yaml` unless model is intentionally changed. |
-| `GEOCODING_PROVIDER` | Yes | Enables address geocoding provider. | `nominatim`, fixed in `render.yaml` for production behavior. |
 | `VAPID_PRIVATE_KEY` | Web Push | Private VAPID key used to sign browser push notifications. | Generate VAPID keypair with `pywebpush`/`web-push`; keep private key only in Render. |
 | `VAPID_PUBLIC_KEY` | Web Push | Public VAPID key used by frontend/browser subscription. | Same generated VAPID keypair; also copy to frontend/mobile config where subscription is created. |
 | `VAPID_MAILTO` | Web Push | Contact claim sent with VAPID requests. | `mailto:info@girospesa.it`, fixed in `render.yaml`. |
@@ -131,7 +130,7 @@ Minimum:
 
 ```bash
 curl -fsS https://api.girospesa.it/health
-curl -fsS "https://api.girospesa.it/offers?lat=38.4116708&lng=16.0742832&max_distance_km=10" >/dev/null
+curl -fsS "https://api.girospesa.it/municipalities?query=Polistena" >/dev/null
 ```
 
 If Supabase changed, verify frontend login and one authenticated route.

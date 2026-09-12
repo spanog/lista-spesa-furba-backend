@@ -119,7 +119,7 @@ Minimum smoke:
 
 ```bash
 curl -fsS https://api.girospesa.it/health
-curl -fsS "https://api.girospesa.it/offers?lat=38.4116708&lng=16.0742832&max_distance_km=10" >/dev/null
+curl -fsS "https://api.girospesa.it/municipalities?query=Polistena" >/dev/null
 ```
 
 ## Post Deploy Record

@@ -3,29 +3,28 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from core.auth import get_optional_user_id, require_admin
-from core.config import settings
 from core.database import get_supabase
 from core.guest_location import GUEST_LOCATION_COOKIE, guest_location_required, read_guest_location
 from api.routers._nearby_supermarkets import (
+    PUBLIC_DISCOVERY_SUPERMARKET_SELECT,
     active_nearby_supermarkets,
+    nearby_supermarket_distances,
+    public_supermarket as serialize_public_supermarket,
     request_location,
 )
-from services.geocoding import geocode_address
+from services.municipalities import MunicipalityNotFoundError, get_municipality
 
 router = APIRouter()
 
 
 class SupermarketUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
-    address: str | None = None
-    city: str | None = None
-    province: str | None = None
-    postal_code: str | None = None
-    lat: float | None = None
-    lng: float | None = None
+    municipality_code: str | None = None
 
 ALLOWED_LOGO_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2 MB
@@ -33,27 +32,19 @@ LOGO_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 LOGO_CACHE_CONTROL = "31536000"
 
 
-def _nearby_supermarkets(sb, lat: float, lng: float, max_distance_km: float) -> list[dict]:
-    response = sb.rpc(
-        "nearby_supermarkets",
-        {
-            "user_lat": lat,
-            "user_lng": lng,
-            "radius_m": max_distance_km * 1000,
-        },
-    ).execute()
-    return response.data or []
-
-
-def _merge_distances(rows: list[dict], nearby_rows: list[dict]) -> list[dict]:
-    rows_by_id = {row["id"]: row for row in rows}
-    distances = {row["id"]: row["distance_km"] for row in nearby_rows}
+def _merge_distances(
+    rows: list[dict], distances: dict[str, float | None], municipality_code: str
+) -> list[dict]:
     merged = [
-        {**row, "distance_km": distances[row["id"]]}
+        {**_public_supermarket(row), "distance_km": distances[row["id"]]}
         for row in rows
         if row["id"] in distances
     ]
-    return sorted(merged, key=lambda row: (row["distance_km"], row["name"]))
+    positions = {supermarket_id: index for index, supermarket_id in enumerate(distances)}
+    return sorted(
+        merged,
+        key=lambda row: (row.get("municipality_code") != municipality_code, positions[row["id"]]),
+    )
 
 
 def _make_slug(name: str) -> str:
@@ -66,6 +57,20 @@ def _unique_slug(sb, base: str) -> str:
     while sb.table("supermarkets").select("id").eq("slug", slug).execute().data:
         slug, i = f"{base}-{i}", i + 1
     return slug
+
+
+def _branch_municipality_code(sb, code: str | None) -> str:
+    if not code:
+        raise HTTPException(status_code=422, detail="Seleziona un Comune dall'elenco")
+    try:
+        get_municipality(sb, code)
+    except MunicipalityNotFoundError:
+        raise HTTPException(status_code=422, detail="Seleziona un Comune dall'elenco")
+    return code
+
+
+def _public_supermarket(supermarket: dict) -> dict:
+    return serialize_public_supermarket(supermarket)
 
 
 @router.get("")
@@ -82,19 +87,25 @@ async def list_supermarkets(
         raise guest_location_required(clear_cookie=guest_token is not None)
     location = request_location(sb, user_id, guest_location)
     if location is not None:
-        user_lat, user_lng, radius = location
-        nearby = _nearby_supermarkets(sb, user_lat, user_lng, radius)
-        ids = [row["id"] for row in nearby]
+        distances = nearby_supermarket_distances(
+            sb, location.municipality_code, location.max_distance_km
+        )
+        ids = list(distances)
         if not ids:
             return []
         if with_active_offers:
-            return active_nearby_supermarkets(
-                sb, {row["id"]: row["distance_km"] for row in nearby}
-            )
+            return active_nearby_supermarkets(sb, distances, location.municipality_code)
         nearby_rows = []
         if ids:
-            resp = sb.table("supermarkets").select("*").in_("id", ids).execute()
-            nearby_rows = _merge_distances(resp.data or [], nearby)
+            resp = (
+                sb.table("supermarkets")
+                .select(PUBLIC_DISCOVERY_SUPERMARKET_SELECT)
+                .in_("id", ids)
+                .execute()
+            )
+            nearby_rows = _merge_distances(
+                resp.data or [], distances, location.municipality_code
+            )
         return nearby_rows
     return []
 
@@ -129,12 +140,7 @@ def _upload_logo(sb, sm_id: str, logo_content: bytes, content_type: str) -> str:
 async def create_supermarket(
     name: Annotated[str, Form()],
     logo: Annotated[UploadFile, File()],
-    address: Annotated[str | None, Form()] = None,
-    city: Annotated[str | None, Form()] = None,
-    province: Annotated[str | None, Form()] = None,
-    postal_code: Annotated[str | None, Form()] = None,
-    lat: Annotated[float | None, Form()] = None,
-    lng: Annotated[float | None, Form()] = None,
+    municipality_code: Annotated[str, Form()],
     _admin: Annotated[dict, Depends(require_admin)] = None,
 ) -> dict:
     """Create a new supermarket branch with required logo. Admin only."""
@@ -150,23 +156,13 @@ async def create_supermarket(
             detail=f"Logo exceeds {MAX_LOGO_SIZE // (1024 * 1024)} MB limit",
         )
 
-    if lat is None and address and settings.geocoding_provider == "nominatim":
-        full_addr = ", ".join(p for p in [address, postal_code, city, province] if p)
-        coords = geocode_address(full_addr)
-        if coords:
-            lat, lng = coords
-
     sb = get_supabase()
     slug = _unique_slug(sb, _make_slug(name))
+    municipality_code = _branch_municipality_code(sb, municipality_code)
     row = {
         "name": name,
         "slug": slug,
-        "address": address,
-        "city": city,
-        "province": province,
-        "postal_code": postal_code,
-        "lat": lat,
-        "lng": lng,
+        "municipality_code": municipality_code,
         "is_active": True,
     }
     resp = sb.table("supermarkets").insert(row).execute()
@@ -185,7 +181,7 @@ async def create_supermarket(
         .eq("id", sm_id)
         .execute()
     )
-    return updated.data[0]
+    return _public_supermarket(updated.data[0])
 
 
 @router.patch("/{supermarket_id}")
@@ -209,17 +205,12 @@ async def update_supermarket(
     existing_row = result.data
     updates = body.model_dump(exclude_unset=True)
     if not updates:
-        return existing_row
+        return _public_supermarket(existing_row)
 
-    if "address" in updates and "lat" not in updates and settings.geocoding_provider == "nominatim":
-        address = updates.get("address") or existing_row.get("address", "")
-        city = updates.get("city") or existing_row.get("city", "")
-        province = updates.get("province") or existing_row.get("province", "")
-        postal_code = updates.get("postal_code") or existing_row.get("postal_code", "")
-        full_addr = ", ".join(p for p in [address, postal_code, city, province] if p)
-        coords = geocode_address(full_addr)
-        if coords:
-            updates["lat"], updates["lng"] = coords
+    if "municipality_code" in updates:
+        updates["municipality_code"] = _branch_municipality_code(
+            sb, updates["municipality_code"]
+        )
 
     updated = (
         sb.table("supermarkets")
@@ -227,7 +218,7 @@ async def update_supermarket(
         .eq("id", supermarket_id)
         .execute()
     )
-    return updated.data[0]
+    return _public_supermarket(updated.data[0])
 
 
 @router.patch("/{supermarket_id}/logo")
@@ -267,4 +258,4 @@ async def update_supermarket_logo(
         .eq("id", supermarket_id)
         .execute()
     )
-    return updated.data[0]
+    return _public_supermarket(updated.data[0])

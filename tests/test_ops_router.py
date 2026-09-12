@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
