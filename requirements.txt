@@ -14,7 +14,7 @@ apscheduler==3.10.4
 google-genai>=1.0.0
 pymupdf>=1.24.0
 Pillow>=11.0.0
-rapidfuzz>=3.0.0
+rapidfuzz>=3.14.5
 
 # Testing
 pytest==9.0.3
