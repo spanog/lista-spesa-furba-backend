@@ -35,7 +35,7 @@ def test_admin_seed_creates_loginable_admin_and_profile(supabase_client):
         smoke = admin_seed.check_admin_seed_health(supabase_client=supabase_client, seed=seed)
         profile = (
             supabase_client.table("user_profiles")
-            .select("home_address,home_city,home_province,home_postal_code")
+            .select("municipality_code,max_distance_km")
             .eq("id", result.user_id)
             .single()
             .execute()
@@ -69,11 +69,6 @@ def test_admin_seed_creates_loginable_admin_and_profile(supabase_client):
     assert smoke.auth_user_exists is True
     assert smoke.profile_role == "admin"
     assert smoke.login_ok is True
-    assert profile == {
-        "home_address": "Via Palmiro Togliatti",
-        "home_city": "Polistena",
-        "home_province": "RC",
-        "home_postal_code": "89024",
-    }
+    assert profile == {"municipality_code": "080061", "max_distance_km": 10}
     assert lists == [{"id": lists[0]["id"], "name": "La mia lista", "items": [], "is_active": True}]
     assert members == [{"list_id": lists[0]["id"], "user_id": result.user_id, "role": "owner"}]

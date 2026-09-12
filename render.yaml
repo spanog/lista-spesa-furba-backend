@@ -29,8 +29,6 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemma-4-31b-it
-      - key: GEOCODING_PROVIDER
-        value: nominatim
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_PUBLIC_KEY

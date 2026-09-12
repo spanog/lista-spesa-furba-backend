@@ -141,7 +141,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
 # Stub infrastructure (same pattern as test_favorites_router.py)
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 

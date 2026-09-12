@@ -46,7 +46,7 @@ girospesa-backend/
 ├── .env.example
 │
 ├── api/routers/              # Endpoint HTTP organizzati per dominio
-│   ├── users.py              # Profilo utente, geocoding, avatar, eliminazione account
+│   ├── users.py              # Profilo utente (Comune + raggio), avatar, eliminazione account
 │   ├── lists.py              # CRUD lista spesa, gestione items, freshness offerte
 │   ├── offers.py             # Offerte attive, ricerca e filtri
 │   ├── flyers.py             # Upload volantini, listing volantini pubblici
@@ -66,7 +66,6 @@ girospesa-backend/
 │   ├── deal_freshness.py     # Classifica freshness offerte in lista (fresh/expired/price_changed)
 │   ├── flyer_cleanup.py      # Eliminazione notturna volantini scaduti (APScheduler, midnight Europe/Rome)
 │   ├── purchased_items_cleanup.py # Rimozione notturna item già acquistati da liste spesa
-│   ├── geocoding.py          # Geocoding indirizzi via Nominatim (OpenStreetMap)
 │   └── push_notify.py        # Invio Web Push con VAPID
 │
 ├── utils/

@@ -24,14 +24,12 @@ def supermarkets(supabase_client, clean_db):
                 {
                     "name": f"Managed Market {uuid.uuid4().hex[:6]}",
                     "slug": f"managed-{uuid.uuid4().hex[:8]}",
-                    "lat": 45.0,
-                    "lng": 9.0,
+                    "municipality_code": "015146",
                 },
                 {
                     "name": f"Foreign Market {uuid.uuid4().hex[:6]}",
                     "slug": f"foreign-{uuid.uuid4().hex[:8]}",
-                    "lat": 46.0,
-                    "lng": 10.0,
+                    "municipality_code": "058091",
                 },
             ]
         )

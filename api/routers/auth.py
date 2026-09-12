@@ -7,13 +7,13 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.config import settings
 from core.database import get_supabase
 from core.session import create_session_token, read_session_token
 from core.supabase_client import create_supabase_client as create_client
-from services.geocoding import geocode_address
+from services.municipalities import MunicipalityNotFoundError, get_municipality
 
 _PASSWORD_RESET_TTL_SECONDS = 60 * 60  # 1-hour recovery window
 
@@ -54,14 +54,13 @@ def _append_query_param(url: str, key: str, value: str) -> str:
 # ---------------------------------------------------------------------------
 
 class SignupBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     first_name: str
     last_name: str
     email: str
     password: str
-    home_address: str
-    home_city: str
-    home_province: str
-    home_postal_code: str
+    municipality_code: str = Field(pattern=r"^[0-9]{6}$")
 
 
 def _signup_error_response(exc: Exception) -> tuple[int, str]:
@@ -74,13 +73,6 @@ def _signup_error_response(exc: Exception) -> tuple[int, str]:
     if "email" in lowered:
         return 400, "Email non valida"
     return 400, "Registrazione non riuscita. Riprova più tardi."
-
-
-def _signup_address(body: SignupBody) -> str:
-    return (
-        f"{body.home_address}, {body.home_postal_code} "
-        f"{body.home_city} {body.home_province}"
-    )
 
 
 def _signup_user_id(response: object) -> str | None:
@@ -102,33 +94,28 @@ def _signup_credentials(body: SignupBody) -> dict:
                 "display_name": display_name,
                 "first_name": body.first_name,
                 "last_name": body.last_name,
-                "home_address": body.home_address,
-                "home_city": body.home_city,
-                "home_province": body.home_province,
-                "home_postal_code": body.home_postal_code,
             }
         },
     }
 
 
-def _persist_signup_coordinates(sb: object, user_id: str, body: SignupBody) -> None:
+def _validate_signup_municipality(sb: object, municipality_code: str) -> None:
     try:
-        coords = geocode_address(_signup_address(body))
-        if not coords:
-            logger.warning("Signup geocoding returned no location for user %s", user_id)
-            return
-        lat, lng = coords
-        sb.table("user_profiles").update({
-            "home_lat": lat,
-            "home_lng": lng,
-        }).eq("id", user_id).execute()
-    except Exception:
-        logger.exception("Signup geocoding failed for user %s", user_id)
+        get_municipality(sb, municipality_code)
+    except MunicipalityNotFoundError as error:
+        raise HTTPException(status_code=422, detail="Seleziona un Comune dall'elenco") from error
+
+
+def _persist_signup_municipality(sb: object, user_id: str, municipality_code: str) -> None:
+    sb.table("user_profiles").update({
+        "municipality_code": municipality_code,
+    }).eq("id", user_id).execute()
 
 
 def signup_user(body: SignupBody) -> None:
-    """Register a new user and persist the initial home coordinates server-side."""
+    """Register a user and persist the selected Comune without user coordinates."""
     sb = get_supabase()
+    _validate_signup_municipality(sb, body.municipality_code)
     try:
         response = sb.auth.sign_up(_signup_credentials(body))
     except Exception as exc:
@@ -137,7 +124,7 @@ def signup_user(body: SignupBody) -> None:
         raise HTTPException(status_code=status_code, detail=detail) from exc
     user_id = _signup_user_id(response)
     if user_id:
-        _persist_signup_coordinates(sb, user_id, body)
+        _persist_signup_municipality(sb, user_id, body.municipality_code)
     else:
         logger.info("Signup returned no new user for %s", body.email)
 

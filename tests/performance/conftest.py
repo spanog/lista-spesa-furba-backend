@@ -99,7 +99,7 @@ def _batch_insert(supabase_client, table: str, rows: list[dict], batch_size: int
 def perf_supermarkets(supabase_client):
     """Seed 5 test supermarkets; clean up at session end."""
     markets = [
-        {"name": f"{_PERF_PREFIX}Market_{i}", "slug": f"perf-market-{uuid.uuid4().hex[:6]}", "lat": 45.46 + i * 0.01, "lng": 9.18}
+        {"name": f"{_PERF_PREFIX}Market_{i}", "slug": f"perf-market-{uuid.uuid4().hex[:6]}", "municipality_code": "015146"}
         for i in range(5)
     ]
     rows = _batch_insert(supabase_client, "supermarkets", markets)

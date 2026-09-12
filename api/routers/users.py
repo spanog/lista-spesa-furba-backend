@@ -11,7 +11,7 @@ from core.auth import get_current_user_id
 from core.config import settings
 from core.database import get_supabase
 from core.supabase_client import create_supabase_client as create_client
-from services.geocoding import geocode_address
+from services.municipalities import MunicipalityNotFoundError, get_municipality
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,30 +25,36 @@ class UpdateProfileBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str | None = None
-    home_address: str | None = None
-    home_city: str | None = None
-    home_province: str | None = None
-    home_postal_code: str | None = None
+    municipality_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
     max_distance_km: int | None = Field(default=None, ge=1, le=20)
     notifications_enabled: bool | None = None
-    search_label: str | None = None
-    search_lat: float | None = None
-    search_lng: float | None = None
 
 
-class GeocodeBody(BaseModel):
-    address: str
+_PROFILE_SELECT = "*, municipalities(code,name,province_name,province_code)"
 
 
-def _point_wkt(lat: float, lng: float) -> str:
-    return f"SRID=4326;POINT({lng} {lat})"
+def _serialize_profile(profile: dict) -> dict:
+    municipality = profile.pop("municipalities", None)
+    return {**profile, "municipality": municipality}
+
+
+def _load_profile(sb, user_id: str) -> dict | None:
+    response = (
+        sb.table("user_profiles")
+        .select(_PROFILE_SELECT)
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    return _serialize_profile(response.data) if response.data else None
 
 
 @router.get("/me")
 async def get_profile(user_id: Annotated[str, Depends(get_current_user_id)]) -> dict:
-    sb = get_supabase()
-    resp = sb.table("user_profiles").select("*").eq("id", user_id).single().execute()
-    return resp.data
+    profile = _load_profile(get_supabase(), user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
 
 
 @router.put("/me")
@@ -58,50 +64,23 @@ async def update_profile(
 ) -> dict:
     sb = get_supabase()
     update_data = body.model_dump(exclude_none=True)
-
-    # If address fields changed, re-geocode
-    if any(k in update_data for k in ("home_address", "home_city", "home_province", "home_postal_code")):
-        profile = sb.table("user_profiles").select("*").eq("id", user_id).single().execute().data
-        addr = (
-            f"{update_data.get('home_address', profile.get('home_address', ''))},"
-            f"{update_data.get('home_postal_code', profile.get('home_postal_code', ''))}"
-            f"{update_data.get('home_city', profile.get('home_city', ''))}"
-            f"{update_data.get('home_province', profile.get('home_province', ''))}"
-        )
-        coords = geocode_address(addr)
-        if coords:
-            update_data["home_lat"], update_data["home_lng"] = coords
-            update_data["home_location"] = _point_wkt(coords[0], coords[1])
-
-    if "search_lat" in update_data and "search_lng" in update_data:
-        update_data["search_location"] = _point_wkt(
-            update_data["search_lat"],
-            update_data["search_lng"],
-        )
+    _validate_municipality_update(sb, update_data)
 
     sb.table("user_profiles").update(update_data).eq("id", user_id).execute()
-    profile = sb.table("user_profiles").select("*").eq("id", user_id).single().execute()
-    if not profile.data:
+    profile = _load_profile(sb, user_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return profile.data
+    return profile
 
 
-@router.post("/geocode")
-async def geocode_user_address(
-    body: GeocodeBody,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-) -> dict:
-    """Trigger geocoding after registration (called by frontend in background)."""
-    coords = geocode_address(body.address)
-    if coords:
-        sb = get_supabase()
-        sb.table("user_profiles").update({
-            "home_lat": coords[0],
-            "home_lng": coords[1],
-            "home_location": _point_wkt(coords[0], coords[1]),
-        }).eq("id", user_id).execute()
-        return {"lat": coords[0], "lng": coords[1]}
-    return {"lat": None, "lng": None}
+def _validate_municipality_update(sb, update_data: dict) -> None:
+    code = update_data.get("municipality_code")
+    if code is None:
+        return
+    try:
+        get_municipality(sb, code)
+    except MunicipalityNotFoundError as error:
+        raise HTTPException(status_code=422, detail="Seleziona un Comune dall'elenco") from error
 
 
 @router.post("/me/avatar")

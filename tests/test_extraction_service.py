@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # ---------------------------------------------------------------------------
 # Stub infrastructure modules
 # ---------------------------------------------------------------------------
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders", "geopy.exc", "requests"):
+for _mod in ("supabase", "jose", "jose.jwt", "requests"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 

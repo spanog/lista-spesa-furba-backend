@@ -38,18 +38,18 @@ def test_past_flyer_notification_is_available_immediately():
     assert _flyer_notification_available_at("2026-08-19", now=now) == now
 
 
-def test_supermarket_notification_location_uses_street_and_city():
+def test_supermarket_notification_location_uses_municipality():
     sb = MagicMock()
     result = sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value
-    result.data = {"address": "Via Roma 1", "city": "Milano"}
+    result.data = {"municipalities": {"name": "Milano", "province_code": "MI"}}
 
-    assert _supermarket_notification_location(sb, "super-1") == "Via Roma 1, Milano"
+    assert _supermarket_notification_location(sb, "super-1") == "Milano (MI)"
 
 
-def test_supermarket_notification_location_falls_back_to_city():
+def test_supermarket_notification_location_falls_back_to_municipality_name():
     sb = MagicMock()
     result = sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value
-    result.data = {"address": None, "city": "Milano"}
+    result.data = {"municipalities": {"name": "Milano", "province_code": None}}
 
     assert _supermarket_notification_location(sb, "super-1") == "Milano"
 

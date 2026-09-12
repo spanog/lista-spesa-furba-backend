@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # ---------------------------------------------------------------------------
 # Stub out infrastructure modules that are not available in the system Python
 # ---------------------------------------------------------------------------
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -28,13 +28,12 @@ sys.modules["core.config"] = _config_mod
 # Stub core.database and core.auth (no DB/JWT calls in these tests)
 sys.modules["core.database"] = MagicMock()
 sys.modules["core.auth"] = MagicMock()
-sys.modules["services.geocoding"] = MagicMock()
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from api.routers.users import GeocodeBody, UpdateProfileBody, geocode_user_address
+from api.routers.users import UpdateProfileBody
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -47,7 +46,6 @@ def cleanup_stubbed_modules():
         "core.auth",
         "core.config",
         "core.database",
-        "services.geocoding",
     ):
         sys.modules.pop(name, None)
 
@@ -69,12 +67,14 @@ class TestUpdateProfileBody:
         with pytest.raises(ValidationError):
             UpdateProfileBody(preferred_supermarkets=["coop"])
 
-    def test_search_custom_point(self):
-        body = UpdateProfileBody(search_label="Ufficio", search_lat=45.4654, search_lng=9.1859)
+    def test_municipality_code_is_accepted(self):
+        body = UpdateProfileBody(municipality_code="080061")
         dumped = body.model_dump(exclude_none=True)
-        assert dumped["search_label"] == "Ufficio"
-        assert dumped["search_lat"] == pytest.approx(45.4654)
-        assert dumped["search_lng"] == pytest.approx(9.1859)
+        assert dumped == {"municipality_code": "080061"}
+
+    def test_non_istat_municipality_code_is_rejected(self):
+        with pytest.raises(ValidationError):
+            UpdateProfileBody(municipality_code="Milano")
 
     def test_max_distance_km_lower_bound(self):
         body = UpdateProfileBody(max_distance_km=1)
@@ -101,53 +101,15 @@ class TestUpdateProfileBody:
         dumped = body.model_dump(exclude_none=True)
         assert dumped["notifications_enabled"] is False
 
-    def test_all_address_fields(self):
-        body = UpdateProfileBody(
-            home_address="Via Roma 1",
-            home_city="Milano",
-            home_province="MI",
-            home_postal_code="20100",
-        )
-        dumped = body.model_dump(exclude_none=True)
-        assert dumped["home_address"] == "Via Roma 1"
-        assert dumped["home_city"] == "Milano"
-        assert dumped["home_province"] == "MI"
-        assert dumped["home_postal_code"] == "20100"
+    def test_address_fields_are_rejected(self):
+        with pytest.raises(ValidationError):
+            UpdateProfileBody(home_address="Via Roma 1")
 
     def test_model_dump_exclude_none_omits_unset_fields(self):
         """Partial patch: only the specified field appears in the dump."""
         body = UpdateProfileBody(display_name="Test")
         dumped = body.model_dump(exclude_none=True)
         assert list(dumped.keys()) == ["display_name"]
-
-
-class TestGeocodeUserAddress:
-    @pytest.mark.asyncio
-    async def test_updates_coordinates_and_home_location(self, monkeypatch):
-        sb = MagicMock()
-        update_chain = sb.table.return_value.update.return_value.eq.return_value
-
-        from api.routers import users
-
-        monkeypatch.setattr(
-            users,
-            "geocode_address",
-            MagicMock(return_value=(45.4642, 9.19)),
-        )
-        monkeypatch.setattr(users, "get_supabase", MagicMock(return_value=sb))
-
-        result = await geocode_user_address(GeocodeBody(address="Via Roma 1"), "user-1")
-
-        assert result == {"lat": 45.4642, "lng": 9.19}
-        sb.table.assert_called_once_with("user_profiles")
-        sb.table.return_value.update.assert_called_once_with(
-            {
-                "home_lat": 45.4642,
-                "home_lng": 9.19,
-                "home_location": "SRID=4326;POINT(9.19 45.4642)",
-            }
-        )
-        update_chain.execute.assert_called_once()
 
 
 class TestDeleteAccount:

@@ -138,7 +138,6 @@ def test_load_admin_seed_requires_env(monkeypatch: pytest.MonkeyPatch):
 def test_seed_admin_creates_missing_admin_user(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "pw-123")
-    monkeypatch.setattr(admin_seed, "geocode_address", lambda address: (38.40172, 16.07398))
     supabase = _FakeSupabase()
 
     result = admin_seed.seed_admin_user(supabase, admin_seed.load_admin_seed_from_env())
@@ -158,12 +157,7 @@ def test_seed_admin_creates_missing_admin_user(monkeypatch: pytest.MonkeyPatch):
             {
                 "id": "created-admin-id",
                 "display_name": "admin",
-                "home_address": "Via Palmiro Togliatti",
-                "home_city": "Polistena",
-                "home_province": "RC",
-                "home_postal_code": "89024",
-                "home_lat": 38.40172,
-                "home_lng": 16.07398,
+                "municipality_code": "080061",
                 "role": "admin",
                 "managed_supermarket_id": None,
             },
@@ -194,7 +188,6 @@ def test_seed_admin_creates_missing_admin_user(monkeypatch: pytest.MonkeyPatch):
 def test_seed_admin_skips_existing_admin_but_keeps_profile_in_sync(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "pw-123")
-    monkeypatch.setattr(admin_seed, "geocode_address", lambda address: (38.40172, 16.07398))
     existing = _FakeUser("existing-admin-id", "admin@example.com", {"role": "admin"})
     supabase = _FakeSupabase([existing])
 
@@ -212,7 +205,6 @@ def test_seed_admin_does_not_duplicate_existing_active_empty_list(
 ):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "pw-123")
-    monkeypatch.setattr(admin_seed, "geocode_address", lambda address: (38.40172, 16.07398))
     existing = _FakeUser("existing-admin-id", "admin@example.com", {"role": "admin"})
     supabase = _FakeSupabase([existing])
     supabase.shopping_lists.select_data = [{"id": "existing-list-id"}]
@@ -236,7 +228,6 @@ def test_seed_admin_does_not_duplicate_existing_active_empty_list(
 def test_seed_admin_updates_existing_user_missing_admin_role(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "pw-123")
-    monkeypatch.setattr(admin_seed, "geocode_address", lambda address: (38.40172, 16.07398))
     existing = _FakeUser("existing-admin-id", "admin@example.com", {"role": "customer"})
     supabase = _FakeSupabase([existing])
 
@@ -265,5 +256,5 @@ def test_module_uses_runtime_env_not_hardcoded_local_seed():
     assert os.path.basename(admin_seed.__file__) == "admin_seed.py"
 
 
-def test_local_config_defaults_to_nominatim():
-    assert type(admin_seed.settings).model_fields["geocoding_provider"].default == "nominatim"
+def test_runtime_config_has_no_geocoding_provider():
+    assert "geocoding_provider" not in type(admin_seed.settings).model_fields

@@ -129,8 +129,7 @@ class TestFlyerUploadIntegration:
                 {
                     "name": f"Upload Market {uuid.uuid4().hex[:6]}",
                     "slug": f"upload-market-{uuid.uuid4().hex[:8]}",
-                    "lat": 45.0,
-                    "lng": 9.0,
+                    "municipality_code": "015146",
                 }
             )
             .execute()

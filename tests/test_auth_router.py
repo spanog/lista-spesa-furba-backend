@@ -6,7 +6,7 @@ import sys
 import types
 from unittest.mock import MagicMock
 
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
@@ -53,10 +53,7 @@ _SIGNUP_BODY = {
     "last_name": "Rossi",
     "email": "mario@example.com",
     "password": "Password123!",
-    "home_address": "Via Roma 1",
-    "home_city": "Milano",
-    "home_province": "MI",
-    "home_postal_code": "20100",
+    "municipality_code": "015146",
 }
 
 
@@ -72,6 +69,15 @@ def test_signup_calls_backend_only_flow(client, monkeypatch):
 
     assert response.status_code == 201
     assert len(signup_calls) == 1
+
+
+def test_signup_rejects_legacy_address_or_coordinate_fields(client):
+    response = client.post(
+        "/auth/signup",
+        json={**_SIGNUP_BODY, "home_address": "Via Roma 1", "lat": 45.46},
+    )
+
+    assert response.status_code == 422
 
 
 def test_signup_returns_duplicate_email_detail(client, monkeypatch):
@@ -98,12 +104,12 @@ def test_signup_returns_upstream_error_detail(client, monkeypatch):
     assert response.json() == {"detail": "Password non valida"}
 
 
-def test_signup_persists_home_coordinates_before_email_confirmation(monkeypatch):
+def test_signup_persists_selected_municipality_before_email_confirmation(monkeypatch):
     fake_sb = MagicMock()
     fake_sb.auth.sign_up.return_value.user.id = "user-1"
     fake_sb.auth.sign_up.return_value.user.identities = [MagicMock()]
     monkeypatch.setattr(_auth_router, "get_supabase", lambda: fake_sb)
-    monkeypatch.setattr(_auth_router, "geocode_address", lambda address: (45.4642, 9.1900))
+    monkeypatch.setattr(_auth_router, "get_municipality", lambda *_: {"code": "015146"})
 
     _auth_router.signup_user(_auth_router.SignupBody(**_SIGNUP_BODY))
 
@@ -111,23 +117,25 @@ def test_signup_persists_home_coordinates_before_email_confirmation(monkeypatch)
     assert signup_data["display_name"] == "Mario Rossi"
     fake_sb.table.assert_called_once_with("user_profiles")
     fake_sb.table.return_value.update.assert_called_once_with({
-        "home_lat": 45.4642,
-        "home_lng": 9.1900,
+        "municipality_code": "015146",
     })
     fake_sb.table.return_value.update.return_value.eq.assert_called_once_with("id", "user-1")
 
 
-def test_signup_keeps_account_when_geocoding_is_unavailable(monkeypatch):
+def test_signup_rejects_a_municipality_not_in_the_catalogue(monkeypatch):
     fake_sb = MagicMock()
-    fake_sb.auth.sign_up.return_value.user.id = "user-1"
-    fake_sb.auth.sign_up.return_value.user.identities = [MagicMock()]
     monkeypatch.setattr(_auth_router, "get_supabase", lambda: fake_sb)
-    monkeypatch.setattr(_auth_router, "geocode_address", lambda address: None)
+    monkeypatch.setattr(
+        _auth_router,
+        "get_municipality",
+        MagicMock(side_effect=_auth_router.MunicipalityNotFoundError("bad")),
+    )
 
-    _auth_router.signup_user(_auth_router.SignupBody(**_SIGNUP_BODY))
+    with pytest.raises(_auth_router.HTTPException) as error:
+        _auth_router.signup_user(_auth_router.SignupBody(**_SIGNUP_BODY))
 
-    fake_sb.auth.sign_up.assert_called_once()
-    fake_sb.table.assert_not_called()
+    assert error.value.status_code == 422
+    fake_sb.auth.sign_up.assert_not_called()
 
 
 def test_signup_does_not_update_a_masked_duplicate_account(monkeypatch):
@@ -135,12 +143,12 @@ def test_signup_does_not_update_a_masked_duplicate_account(monkeypatch):
     fake_sb.auth.sign_up.return_value.user.id = "masked-user"
     fake_sb.auth.sign_up.return_value.user.identities = []
     monkeypatch.setattr(_auth_router, "get_supabase", lambda: fake_sb)
-    geocode = MagicMock(return_value=(45.4642, 9.1900))
-    monkeypatch.setattr(_auth_router, "geocode_address", geocode)
+    municipality = MagicMock(return_value={"code": "015146"})
+    monkeypatch.setattr(_auth_router, "get_municipality", municipality)
 
     _auth_router.signup_user(_auth_router.SignupBody(**_SIGNUP_BODY))
 
-    geocode.assert_not_called()
+    municipality.assert_called_once_with(fake_sb, "015146")
     fake_sb.table.assert_not_called()
 
 

@@ -21,7 +21,7 @@ from api.routers._offer_utils import build_offer_row, insert_and_fetch_offer
 
 router = APIRouter()
 
-PUBLIC_OFFER_SELECT = "*, supermarkets(name, slug, logo_url, address, city)"
+PUBLIC_OFFER_SELECT = "*, supermarkets(name, slug, logo_url, municipality_code, municipalities(name,province_code))"
 
 
 def _offer_group_key(offer: dict) -> str:
@@ -31,7 +31,7 @@ def _offer_group_key(offer: dict) -> str:
 
 
 def _deduplicate_nearby_offers(
-    offers: list[dict], distances_by_supermarket_id: dict[str, float]
+    offers: list[dict], distances_by_supermarket_id: dict[str, float | None]
 ) -> list[dict]:
     """Choose nearest target for each cloned source offer with deterministic ties."""
     representatives: dict[str, dict] = {}
@@ -80,22 +80,13 @@ def _offer_summary(offers: list[dict]) -> dict:
     }
 
 
-def _supermarket_address(supermarket: dict, fallback_name: str | None) -> str | None:
-    address = (supermarket.get("address") or "").strip()
-    city = (supermarket.get("city") or "").strip()
-    if not address:
-        return city or None
-    if not city:
-        return address
-    normalized_address = address.casefold()
-    normalized_city = city.casefold()
-    normalized_name = (supermarket.get("name") or fallback_name or "").strip().casefold()
-    if normalized_address == normalized_city or (
-        normalized_name and normalized_address.startswith(normalized_name)
-        and normalized_address.endswith(normalized_city)
-    ):
-        return city
-    return address if normalized_city in normalized_address else f"{address}, {city}"
+def _supermarket_municipality(supermarket: dict) -> str | None:
+    municipality = supermarket.get("municipalities") or {}
+    name = municipality.get("name")
+    province = municipality.get("province_code")
+    if not name:
+        return None
+    return f"{name} ({province})" if province else name
 
 
 def _public_offers_query(sb, *, exact_count: bool):
@@ -141,7 +132,7 @@ def _public_offers_response(
     supermarket_ids: list[str],
     limit: int,
     offset: int,
-    distances_by_supermarket_id: dict[str, float] | None,
+    distances_by_supermarket_id: dict[str, float | None] | None,
 ) -> dict:
     query = _filter_public_offers(
         _public_offers_query(sb, exact_count=distances_by_supermarket_id is None),
@@ -181,7 +172,9 @@ def _nearby_offer_page(offers: list[dict], offset: int, limit: int) -> dict:
     }
 
 
-def _request_distances(sb, request: Request, user_id: str | None) -> dict[str, float] | None:
+def _request_distances(
+    sb, request: Request, user_id: str | None
+) -> dict[str, float | None] | None:
     guest_token = request.cookies.get(GUEST_LOCATION_COOKIE) if user_id is None else None
     guest_location = read_guest_location(guest_token)
     if user_id is None and guest_location is None:
@@ -189,7 +182,9 @@ def _request_distances(sb, request: Request, user_id: str | None) -> dict[str, f
     location = request_location(sb, user_id, guest_location)
     if location is None:
         return None
-    return nearby_supermarket_distances(sb, *location)
+    return nearby_supermarket_distances(
+        sb, location.municipality_code, location.max_distance_km
+    )
 
 
 @router.get("")
@@ -253,9 +248,7 @@ def _serialize_offers(rows: list[dict]) -> list[dict]:
             "supermarket_name": supermarket.get("name") or row.get("supermarket_name"),
             "supermarket_slug": supermarket.get("slug"),
             "supermarket_logo_url": supermarket.get("logo_url"),
-            "supermarket_address": _supermarket_address(
-                supermarket, row.get("supermarket_name")
-            ),
+            "supermarket_municipality": _supermarket_municipality(supermarket),
         })
     return offers
 

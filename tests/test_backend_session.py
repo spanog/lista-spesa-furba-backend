@@ -26,6 +26,7 @@ import core.session as session
 import core.guest_location as guest_location
 from core.guest_location import GUEST_LOCATION_RADIUS_KM, create_guest_location_token, read_guest_location
 from api.routers.guest_location import router as guest_location_router
+import api.routers.guest_location as guest_location_router_module
 
 
 guest_location_app = FastAPI()
@@ -91,9 +92,9 @@ def test_invalid_session_token_is_rejected(stub_session_settings) -> None:
 
 
 def test_guest_location_token_is_signed_and_has_fixed_radius(stub_session_settings) -> None:
-    token = create_guest_location_token(45.4642, 9.19)
+    token = create_guest_location_token("015146")
 
-    assert read_guest_location(token) == (45.4642, 9.19, GUEST_LOCATION_RADIUS_KM)
+    assert read_guest_location(token) == ("015146", GUEST_LOCATION_RADIUS_KM)
     assert read_guest_location(f"{token}tampered") is None
 
 
@@ -121,13 +122,20 @@ def test_guest_location_cookie_uses_none_for_https_origin(
 
 
 @pytest.mark.asyncio
-async def test_guest_location_endpoint_sets_cross_site_cookie_for_capacitor() -> None:
+async def test_guest_location_endpoint_sets_cross_site_cookie_for_capacitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        guest_location_router_module,
+        "get_municipality",
+        lambda *_: {"code": "080061"},
+    )
     transport = httpx.ASGITransport(app=guest_location_app)
     async with httpx.AsyncClient(transport=transport, base_url="https://api.test") as client:
         response = await client.post(
             "/guest-location",
             headers={"Origin": "https://app.girospesa.local"},
-            json={"lat": 38.4, "lng": 16.1},
+            json={"municipality_code": "080061"},
         )
 
     cookie = response.headers["set-cookie"]
@@ -137,7 +145,26 @@ async def test_guest_location_endpoint_sets_cross_site_cookie_for_capacitor() ->
 
 
 @pytest.mark.asyncio
-async def test_guest_location_cookie_round_trips_on_direct_api_origin() -> None:
+async def test_guest_location_endpoint_rejects_user_coordinates() -> None:
+    transport = httpx.ASGITransport(app=guest_location_app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.test") as client:
+        response = await client.post(
+            "/guest-location",
+            json={"municipality_code": "080061", "lat": 38.4, "lng": 16.1},
+        )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_guest_location_cookie_round_trips_on_direct_api_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        guest_location_router_module,
+        "get_municipality",
+        lambda *_: {"code": "080061"},
+    )
     transport = httpx.ASGITransport(app=guest_location_app)
     async with httpx.AsyncClient(
         transport=transport,
@@ -146,7 +173,7 @@ async def test_guest_location_cookie_round_trips_on_direct_api_origin() -> None:
         response = await client.post(
             "/guest-location",
             headers={"Origin": "https://www.girospesa.it"},
-            json={"lat": 38.4, "lng": 16.1},
+            json={"municipality_code": "080061"},
         )
         cookie_response = await client.get("/guest-location/cookie")
 

@@ -7,29 +7,27 @@ Il backend FastAPI è l'unica API applicativa. Le chiamate autenticate usano un 
 | Metodo | Path | Accesso | Descrizione |
 | --- | --- | --- | --- |
 | `GET` | `/offers` | Pubblico | Offerte confermate e attive, con ricerca, filtri e paginazione; non espone un parametro di ordinamento. Accetta `q`, `category`, `subcategory`, `supermarket_id` e `supermarket_ids`. |
-| `GET` | `/offers/discovery` | Pubblico | Prima pagina offerte e sedi vicine con offerte attive, risolte dalla stessa posizione; accetta gli stessi filtri di `/offers`. Le pagine successive restano su `/offers`. |
-| `POST` | `/guest-location` | Pubblico | Valida una posizione guest e imposta il cookie tecnico firmato usato dalla discovery. |
+| `GET` | `/offers/discovery` | Pubblico | Prima pagina offerte e sedi dell'area Comune+raggio con offerte attive; accetta gli stessi filtri di `/offers`. Le pagine successive restano su `/offers`. |
+| `POST` | `/guest-location` | Pubblico | Accetta `{ "municipality_code": "080061" }`, valida il Comune e imposta il cookie tecnico firmato usato dalla discovery. Il raggio guest è sempre 10 km. |
 | `DELETE` | `/guest-location` | Pubblico | Rimuove il cookie tecnico di località guest. |
 
 Un'offerta contiene i propri dati, validità, prezzo, formato strutturato e `image_url`. Il backend determina la disponibilità corrente esclusivamente da `valid_from` e `valid_to`, usando il giorno `Europe/Rome`; nessun client calcola autonomamente lo stato dell'offerta. Non esistono endpoint per catalogo prodotti, dettagli prodotto o preferiti prodotto.
 
-## Geocoding
+## Comuni
 
 | Metodo | Path | Accesso | Descrizione |
 | --- | --- | --- | --- |
-| `GET` | `/geocoding/addresses?query={query}` | Pubblico | Suggerimenti di indirizzi italiani per i form. |
-| `GET` | `/geocoding/locations?query={query}` | Pubblico | Località selezionabili per la discovery guest. |
-| `GET` | `/geocoding/locations/reverse?lat={lat}&lng={lng}` | Pubblico | Etichetta leggibile di coordinate geografiche. |
+| `GET` | `/municipalities?query={query}` | Pubblico | Suggerimenti dall'archivio ISTAT: `code`, Comune e provincia, senza coordinate. |
 
-I client non contattano il provider di geocoding: il backend ne mantiene configurazione, credenziali e migrazioni.
+Profili, cookie guest e filiali accettano solo il codice ISTAT del Comune. Il backend calcola il raggio confrontando i centri ISTAT dei Comuni; nessuna API accetta o espone indirizzi o coordinate.
 
 ## Volantini
 
 | Metodo | Path | Accesso | Descrizione |
 | --- | --- | --- | --- |
-| `GET` | `/flyers/public` | Pubblico | Volantini pubblici correnti nel raggio attivo. Per i guest richiede il cookie di località firmato; senza località restituisce `428 guest_location_required`. |
-| `GET` | `/flyers/discovery` | Pubblico | Volantini pubblici correnti e tutte le sedi vicine in una sola risposta di discovery. Per i guest richiede il cookie di località firmato. |
-| `GET` | `/supermarkets?with_active_offers=true` | Pubblico | Sedi nel raggio attivo, anche per admin e gestori. Per i guest richiede il cookie di località firmato; senza località restituisce `428 guest_location_required`. |
+| `GET` | `/flyers/public` | Pubblico | Volantini pubblici correnti nell'area Comune+raggio. Per i guest richiede il cookie di località firmato; senza Comune restituisce `428 guest_location_required`. |
+| `GET` | `/flyers/discovery` | Pubblico | Volantini pubblici correnti e sedi nell'area Comune+raggio in una risposta. Per i guest richiede il cookie di località firmato. |
+| `GET` | `/supermarkets?with_active_offers=true` | Pubblico | Sedi nell'area Comune+raggio, anche per admin e gestori. Ogni sede espone solo il proprio Comune. |
 | `GET` | `/flyers/targets` | Admin/manager | Sedi selezionabili nella gestione volantini: tutte le sedi attive per admin, solo sedi assegnate per gestore. |
 | `GET` | `/flyers` | Admin/manager | Elenco volantini in gestione. |
 | `GET` | `/flyers/{flyer_id}` | Admin/manager | Dettaglio e stato di estrazione. |
@@ -68,12 +66,12 @@ L'estrazione salva subito le bozze di ogni chunk riuscito. In caso di errore, `e
 | `POST` | `/push/native/subscribe` | Autenticato | Registra token FCM. |
 | `POST` | `/ops/cron/notifications` | Ops secret | Drena i job di notifica. |
 
-La conferma di un volantino accoda un job idempotente `flyer_published` e risponde senza attendere consegne. Se `valid_from` è futura, il job viene eseguito alle 10:00 `Europe/Rome` di quel giorno; senza data, viene eseguito subito. Il worker ricontrolla che il volantino sia ancora pubblico e valido, poi materializza job figli per tutti gli admin, per il manager della sede pubblicata e per i customer nel raggio della loro posizione di ricerca o casa, crea lo storico in `app_notifications`, invia Web Push/FCM solo con notifiche account abilitate e collega il tap a `/volantini?supermarket_id=<UUID-sede>`.
+La conferma di un volantino accoda un job idempotente `flyer_published` e risponde senza attendere consegne. Se `valid_from` è futura, il job viene eseguito alle 10:00 `Europe/Rome` di quel giorno; senza data, viene eseguito subito. Il worker ricontrolla che il volantino sia ancora pubblico e valido, poi materializza job figli per tutti gli admin, per il manager della sede pubblicata e per i customer la cui area Comune+raggio include la filiale, crea lo storico in `app_notifications`, invia Web Push/FCM solo con notifiche account abilitate e collega il tap a `/volantini?supermarket_id=<UUID-sede>`.
 
 ## Altri endpoint
 
-- `/users`: profilo, geocoding e avatar.
-- `/supermarkets`: elenco e filtri di distanza.
+- `/users`: profilo Comune+raggio e avatar.
+- `/supermarkets`: elenco nell'area Comune+raggio.
 - `/purchases`: storico acquisti.
 - `/analytics/b2b`: analytics con API key.
 - `/ops/cron/daily-maintenance`: manutenzione giornaliera.

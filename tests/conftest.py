@@ -25,30 +25,6 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 load_dotenv(resolve_test_env_file(BACKEND_ROOT), override=False)
 
-if "geopy.exc" not in sys.modules:
-    try:
-        import geopy.exc as geopy_exc  # type: ignore[import-not-found]
-    except Exception:
-        geopy_exc = types.ModuleType("geopy.exc")
-
-        class GeocoderNotFound(Exception):
-            pass
-
-        class GeocoderTimedOut(Exception):
-            pass
-
-        class GeocoderServiceError(Exception):
-            pass
-
-        class ConfigurationError(Exception):
-            pass
-
-        geopy_exc.GeocoderNotFound = GeocoderNotFound
-        geopy_exc.GeocoderTimedOut = GeocoderTimedOut
-        geopy_exc.GeocoderServiceError = GeocoderServiceError
-        geopy_exc.ConfigurationError = ConfigurationError
-    sys.modules["geopy.exc"] = geopy_exc
-
 
 def _resolve_local_supabase_env(name: str) -> str:
     value = os.environ.get(name, "")

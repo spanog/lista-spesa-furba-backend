@@ -11,21 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # ---------------------------------------------------------------------------
 # Stub infrastructure modules
 # ---------------------------------------------------------------------------
-for _mod in ("supabase", "jose", "jose.jwt", "geopy", "geopy.geocoders"):
+for _mod in ("supabase", "jose", "jose.jwt"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
 _db_mod = types.ModuleType("core.database")
 _db_mod.get_supabase = MagicMock()  # type: ignore[attr-defined]
 sys.modules["core.database"] = _db_mod
-
-_config_mod = types.ModuleType("core.config")
-_settings_obj = MagicMock()
-_settings_obj.geocoding_provider = "disabled"
-_config_mod.settings = _settings_obj  # type: ignore[attr-defined]
-sys.modules["core.config"] = _config_mod
-
-sys.modules["services.geocoding"] = MagicMock()
 
 # ---------------------------------------------------------------------------
 # Stub core.auth — use MagicMock so FastAPI doesn't infer body params
@@ -47,6 +39,7 @@ import httpx
 import pytest
 
 import api.routers.supermarkets as _sm_module
+from api.routers._nearby_supermarkets import DiscoveryArea
 from api.routers.supermarkets import router
 
 _DEP_REQUIRE_ADMIN = _sm_module.require_admin
@@ -60,6 +53,15 @@ test_app.include_router(router, prefix="/supermarkets")
 ADMIN_USER = {"id": "admin-1", "app_metadata": {"role": "admin"}}
 
 MINIMAL_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"  # valid JPEG magic
+
+
+@pytest.fixture(autouse=True)
+def municipality_catalog(monkeypatch):
+    monkeypatch.setattr(
+        _sm_module,
+        "get_municipality",
+        lambda _sb, _code: {"code": "015146"},
+    )
 
 
 def _admin_dep():
@@ -164,11 +166,11 @@ async def test_with_active_offers_uses_authenticated_profile_radius():
         patch("api.routers.supermarkets.get_supabase", return_value=sb),
         patch(
             "api.routers.supermarkets.request_location",
-            return_value=(38.4, 16.1, 7.0),
+            return_value=DiscoveryArea("080061", 7.0),
         ) as request_location,
         patch(
-            "api.routers.supermarkets._nearby_supermarkets",
-            return_value=[{"id": "sup-polistena", "distance_km": 1.1}],
+            "api.routers.supermarkets.nearby_supermarket_distances",
+            return_value={"sup-polistena": 1.1},
         ),
             patch(
                 "api.routers.supermarkets.active_nearby_supermarkets",
@@ -222,8 +224,18 @@ async def test_admin_supermarkets_use_authenticated_profile_distance():
     query.in_.return_value = query
     query.execute.return_value = MagicMock(
         data=[
-            {"id": "sm-near", "name": "Diper", "city": "Polistena"},
-            {"id": "sm-far", "name": "Diper", "city": "Gioia Tauro"},
+                {
+                    "id": "sm-near",
+                    "name": "Diper",
+                    "municipality_code": "080061",
+                    "municipalities": {"name": "Polistena", "province_code": "RC"},
+                },
+                {
+                    "id": "sm-far",
+                    "name": "Diper",
+                    "municipality_code": "080050",
+                    "municipalities": {"name": "Gioia Tauro", "province_code": "RC"},
+                },
         ]
     )
     sb.table.return_value = query
@@ -232,11 +244,11 @@ async def test_admin_supermarkets_use_authenticated_profile_distance():
         patch("api.routers.supermarkets.get_supabase", return_value=sb),
         patch(
             "api.routers.supermarkets.request_location",
-            return_value=(38.4, 16.1, 7.0),
+            return_value=DiscoveryArea("080061", 7.0),
         ) as request_location,
         patch(
-            "api.routers.supermarkets._nearby_supermarkets",
-            return_value=[{"id": "sm-near", "distance_km": 1.1}],
+            "api.routers.supermarkets.nearby_supermarket_distances",
+            return_value={"sm-near": 1.1},
         ),
     ):
         result = await _sm_module.list_supermarkets(
@@ -247,7 +259,14 @@ async def test_admin_supermarkets_use_authenticated_profile_distance():
 
     request_location.assert_called_once_with(sb, "admin-1", None)
     assert result == [
-        {"id": "sm-near", "name": "Diper", "city": "Polistena", "distance_km": 1.1}
+        {
+            "id": "sm-near",
+            "name": "Diper",
+            "municipality_code": "080061",
+            "municipality_name": "Polistena",
+            "municipality_province_code": "RC",
+            "distance_km": 1.1,
+        }
     ]
 
 
@@ -267,12 +286,7 @@ async def test_create_supermarket_success():
         "id": "sm-new",
         "name": "Nuovo Market",
         "slug": "nuovo-market",
-        "address": "Via Roma 1",
-        "city": "Milano",
-        "province": "Milano",
-        "postal_code": "20100",
-        "lat": None,
-        "lng": None,
+        "municipality_code": "015146",
         "is_active": True,
         "logo_url": None,
     }
@@ -289,10 +303,7 @@ async def test_create_supermarket_success():
             "/supermarkets",
             {
                 "name": "Nuovo Market",
-                "address": "Via Roma 1",
-                "city": "Milano",
-                "province": "Milano",
-                "postal_code": "20100",
+                "municipality_code": "015146",
             },
         )
 
@@ -307,8 +318,8 @@ async def test_create_supermarket_success():
 
 
 @pytest.mark.asyncio
-async def test_create_supermarket_skips_geocode_when_coords_provided():
-    new_row = {"id": "sm-2", "name": "Test", "slug": "test", "lat": 45.5, "lng": 9.2, "is_active": True, "logo_url": None}
+async def test_create_supermarket_uses_only_municipality_code():
+    new_row = {"id": "sm-2", "name": "Test", "slug": "test", "municipality_code": "001272", "is_active": True, "logo_url": None}
     updated_row = {**new_row, "logo_url": "https://example.com/logos/sm-2.jpg"}
     sb = MagicMock()
     sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
@@ -318,42 +329,16 @@ async def test_create_supermarket_skips_geocode_when_coords_provided():
     sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
 
     with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-        with patch("api.routers.supermarkets.geocode_address") as mock_geocode:
-            resp = await _post_admin_form(
-                "/supermarkets",
-                {"name": "Test", "address": "Via Po 5", "city": "Torino",
-                 "province": "Torino", "postal_code": "10100", "lat": 45.5, "lng": 9.2},
-            )
+        resp = await _post_admin_form(
+            "/supermarkets",
+            {"name": "Test", "municipality_code": "001272", "address": "Via Po 5", "lat": 45.5, "lng": 9.2},
+        )
 
     assert resp.status_code == 201
-    mock_geocode.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_supermarket_geocodes_when_no_coords():
-    new_row = {"id": "sm-3", "name": "Geocoded", "slug": "geocoded", "lat": 44.4, "lng": 8.9, "is_active": True, "logo_url": None}
-    updated_row = {**new_row, "logo_url": "https://example.com/logos/sm-3.jpg"}
-    sb = MagicMock()
-    sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-    sb.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[new_row])
-    sb.storage.from_.return_value.upload.return_value = None
-    sb.storage.from_.return_value.get_public_url.return_value = "https://example.com/logos/sm-3.jpg"
-    sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
-
-    _settings_obj.geocoding_provider = "nominatim"
-    try:
-        with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-            with patch("api.routers.supermarkets.geocode_address", return_value=(44.4, 8.9)) as mock_geocode:
-                resp = await _post_admin_form(
-                    "/supermarkets",
-                    {"name": "Geocoded", "address": "Via Garibaldi 3",
-                     "city": "Genova", "province": "Genova", "postal_code": "16100"},
-                )
-    finally:
-        _settings_obj.geocoding_provider = "disabled"
-
-    assert resp.status_code == 201
-    mock_geocode.assert_called_once()
+    inserted = sb.table.return_value.insert.call_args.args[0]
+    assert inserted == {
+        "name": "Test", "slug": "test", "municipality_code": "001272", "is_active": True,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +349,7 @@ async def test_create_supermarket_geocodes_when_no_coords():
 async def test_create_supermarket_logo_wrong_type_rejected():
     resp = await _post_admin_form(
         "/supermarkets",
-        {"name": "Test"},
+        {"name": "Test", "municipality_code": "015146"},
         logo=("logo.pdf", io.BytesIO(b"%PDF"), "application/pdf"),
     )
     assert resp.status_code == 422
@@ -375,7 +360,7 @@ async def test_create_supermarket_logo_too_large_rejected():
     big_content = b"\xff\xd8\xff" + b"x" * (2 * 1024 * 1024 + 1)
     resp = await _post_admin_form(
         "/supermarkets",
-        {"name": "Test"},
+        {"name": "Test", "municipality_code": "015146"},
         logo=("logo.jpg", io.BytesIO(big_content), "image/jpeg"),
     )
     assert resp.status_code == 413
@@ -390,7 +375,9 @@ async def test_create_supermarket_logo_upload_failure_rolls_back():
     sb.storage.from_.return_value.upload.side_effect = Exception("Storage down")
 
     with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-        resp = await _post_admin_form("/supermarkets", {"name": "Rollback"})
+        resp = await _post_admin_form(
+            "/supermarkets", {"name": "Rollback", "municipality_code": "015146"}
+        )
 
     assert resp.status_code == 500
     sb.table.return_value.delete.return_value.eq.return_value.execute.assert_called_once()
@@ -464,15 +451,11 @@ async def test_update_logo_keeps_old_immutable_asset_when_replaced():
     sb.storage.from_.return_value.get_public_url.return_value = updated_row["logo_url"]
     sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
 
-    _settings_obj.supabase_url = "https://proj.supabase.co"
-    try:
-        with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-            resp = await _patch_logo(
-                "/supermarkets/sm-1/logo",
-                logo=("logo.png", io.BytesIO(b"\x89PNG"), "image/png"),
-            )
-    finally:
-        _settings_obj.supabase_url = MagicMock()
+    with patch("api.routers.supermarkets.get_supabase", return_value=sb):
+        resp = await _patch_logo(
+            "/supermarkets/sm-1/logo",
+            logo=("logo.png", io.BytesIO(b"\x89PNG"), "image/png"),
+        )
 
     assert resp.status_code == 200
     sb.storage.from_.return_value.remove.assert_not_called()
@@ -518,12 +501,12 @@ async def test_update_supermarket_not_found():
 @pytest.mark.asyncio
 async def test_update_supermarket_success():
     existing = {"id": "sm-1"}
-    updated_row = {"id": "sm-1", "name": "Nuovo Nome", "address": "Via Nuova 1", "city": "Roma", "province": "RM", "postal_code": "00100", "logo_url": None}
+    updated_row = {"id": "sm-1", "name": "Nuovo Nome", "municipality_code": "058091", "logo_url": None}
     sb = MagicMock()
     sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=existing)
     sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
     with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-        resp = await _patch_info("/supermarkets/sm-1", {"name": "Nuovo Nome", "address": "Via Nuova 1", "city": "Roma", "province": "RM", "postal_code": "00100"})
+        resp = await _patch_info("/supermarkets/sm-1", {"name": "Nuovo Nome", "municipality_code": "058091"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "Nuovo Nome"
 
@@ -540,39 +523,19 @@ async def test_update_supermarket_empty_body_returns_current():
 
 
 @pytest.mark.asyncio
-async def test_update_supermarket_geocodes_when_address_changes():
-    existing = {"id": "sm-1", "address": "Via Vecchia 1", "city": "Roma", "province": "RM", "postal_code": "00100"}
-    updated_row = {"id": "sm-1", "name": "Test", "lat": 41.9, "lng": 12.5}
+async def test_update_supermarket_changes_municipality_code():
+    existing = {"id": "sm-1", "municipality_code": "080061"}
+    updated_row = {"id": "sm-1", "name": "Test", "municipality_code": "058091"}
     sb = MagicMock()
     sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=existing)
     sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
-    _settings_obj.geocoding_provider = "nominatim"
-    try:
-        with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-            with patch("api.routers.supermarkets.geocode_address", return_value=(41.9, 12.5)) as mock_geo:
-                resp = await _patch_info("/supermarkets/sm-1", {"address": "Via Roma 1", "city": "Roma"})
-    finally:
-        _settings_obj.geocoding_provider = "disabled"
+    with patch("api.routers.supermarkets.get_supabase", return_value=sb):
+        resp = await _patch_info("/supermarkets/sm-1", {"municipality_code": "058091"})
     assert resp.status_code == 200
-    mock_geo.assert_called_once()
-    call_args = mock_geo.call_args[0][0]
-    assert "Via Roma 1" in call_args
-    assert "Roma" in call_args
 
 
 @pytest.mark.asyncio
-async def test_update_supermarket_no_geocode_when_lat_explicitly_provided():
-    existing = {"id": "sm-1", "address": "Via Vecchia 1", "city": "Milano", "province": "MI", "postal_code": "20100"}
-    updated_row = {**existing, "address": "Via Nuova 1", "lat": None, "lng": None}
-    sb = MagicMock()
-    sb.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=existing)
-    sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_row])
-    _settings_obj.geocoding_provider = "nominatim"
-    try:
-        with patch("api.routers.supermarkets.get_supabase", return_value=sb):
-            with patch("api.routers.supermarkets.geocode_address") as mock_geo:
-                resp = await _patch_info("/supermarkets/sm-1", {"address": "Via Nuova 1", "lat": None})
-    finally:
-        _settings_obj.geocoding_provider = "disabled"
-    assert resp.status_code == 200
-    mock_geo.assert_not_called()
+async def test_update_supermarket_rejects_client_coordinates():
+    response = await _patch_info("/supermarkets/sm-1", {"lat": 41.9})
+
+    assert response.status_code == 422

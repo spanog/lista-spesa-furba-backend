@@ -17,7 +17,12 @@ from core.auth import (
     managed_supermarket_ids,
     require_admin_or_manager,
 )
-from api.routers._nearby_supermarkets import nearby_supermarket_distances, request_location
+from api.routers._nearby_supermarkets import (
+    PUBLIC_DISCOVERY_SUPERMARKET_SELECT,
+    nearby_supermarket_distances,
+    public_supermarket,
+    request_location,
+)
 from core.config import settings
 from core.database import get_supabase
 from core.guest_location import GUEST_LOCATION_COOKIE, guest_location_required, read_guest_location
@@ -168,7 +173,7 @@ def _public_flyers(sb, supermarket_ids: list[str]) -> list[dict]:
 
 def _public_flyer_context(
     sb, request: Request, user_id: str | None
-) -> tuple[list[dict], dict[str, float]]:
+) -> tuple[list[dict], dict[str, float | None]]:
     guest_token = request.cookies.get(GUEST_LOCATION_COOKIE) if user_id is None else None
     guest_location = read_guest_location(guest_token)
     if user_id is None and guest_location is None:
@@ -176,25 +181,35 @@ def _public_flyer_context(
     location = request_location(sb, user_id, guest_location)
     if location is None:
         return [], {}
-    distances = nearby_supermarket_distances(sb, *location)
+    distances = nearby_supermarket_distances(
+        sb, location.municipality_code, location.max_distance_km
+    )
     flyers = _public_flyers(sb, list(distances))
     return flyers, distances
 
 
-def _nearby_supermarket_rows(sb, distances: dict[str, float]) -> list[dict]:
+def _nearby_supermarket_rows(sb, distances: dict[str, float | None]) -> list[dict]:
     if not distances:
         return []
-    rows = sb.table("supermarkets").select("*").in_("id", list(distances)).execute().data or []
+    rows = (
+        sb.table("supermarkets")
+        .select(PUBLIC_DISCOVERY_SUPERMARKET_SELECT)
+        .in_("id", list(distances))
+        .execute()
+        .data
+        or []
+    )
     visible = [
         {**row, "distance_km": distances[row["id"]]}
         for row in rows
         if row.get("id") in distances
     ]
-    return sorted(visible, key=lambda row: (row["distance_km"], row["name"]))
+    positions = {supermarket_id: index for index, supermarket_id in enumerate(distances)}
+    return sorted(visible, key=lambda row: positions[row["id"]])
 
 
 def _visible_public_flyers(
-    sb, flyers: list[dict], distances: dict[str, float]
+    sb, flyers: list[dict], distances: dict[str, float | None]
 ) -> list[dict]:
     if not flyers:
         return []
@@ -211,9 +226,10 @@ def _visible_public_flyers(
     return sorted(visible, key=lambda flyer: _public_flyer_sort_key(flyer, distances))
 
 
-def _public_flyer_sort_key(flyer: dict, distances: dict[str, float]) -> tuple:
+def _public_flyer_sort_key(flyer: dict, distances: dict[str, float | None]) -> tuple:
+    positions = {supermarket_id: index for index, supermarket_id in enumerate(distances)}
     return (
-        distances[flyer["supermarket_id"]],
+        positions[flyer["supermarket_id"]],
         _public_flyer_expiry_sort_key(flyer),
         flyer["id"],
     )
@@ -282,7 +298,7 @@ def _offer_kind(offer: dict) -> str:
 def _flyer_targets(sb, flyer_id: str) -> list[dict]:
     result = (
         sb.table("flyer_targets")
-        .select("id, supermarket_id, supermarkets(id, name, address, city, province, postal_code, logo_url)")
+        .select("id, supermarket_id, supermarkets(id, name, municipality_code, logo_url, municipalities(name,province_code))")
         .eq("flyer_id", flyer_id)
         .execute()
     )
@@ -294,10 +310,9 @@ def _flyer_targets(sb, flyer_id: str) -> list[dict]:
                 "id": row.get("id"),
                 "supermarket_id": row["supermarket_id"],
                 "supermarket_name": supermarket.get("name"),
-                "address": supermarket.get("address"),
-                "city": supermarket.get("city"),
-                "province": supermarket.get("province"),
-                "postal_code": supermarket.get("postal_code"),
+                "municipality_code": supermarket.get("municipality_code"),
+                "municipality_name": (supermarket.get("municipalities") or {}).get("name"),
+                "municipality_province_code": (supermarket.get("municipalities") or {}).get("province_code"),
                 "logo_url": supermarket.get("logo_url"),
             }
         )
@@ -1026,10 +1041,14 @@ def _assert_flyer_access(sb, profile: dict, flyer: dict) -> None:
 def _flyer_target_supermarkets(sb, supermarket_ids: list[str] | None) -> list[dict]:
     if supermarket_ids == []:
         return []
-    query = sb.table("supermarkets").select("*").eq("is_active", True)
+    query = (
+        sb.table("supermarkets")
+        .select(PUBLIC_DISCOVERY_SUPERMARKET_SELECT)
+        .eq("is_active", True)
+    )
     if supermarket_ids is not None:
         query = query.in_("id", supermarket_ids)
-    return query.order("name").execute().data or []
+    return [public_supermarket(row) for row in (query.order("name").execute().data or [])]
 
 
 @router.get("/targets")
